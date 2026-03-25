@@ -1,12 +1,9 @@
 import numpy as np
 import casadi as ca
 import numpy as np
-import matplotlib.pyplot as plt
-from dq_nmpc import Quaternion
-from dq_nmpc import DualQuaternion
+from .quaternion_casadi import Quaternion
+from .dual_quaternion_casadi import DualQuaternion
 from casadi import Function
-from casadi import jacobian
-from acados_template import AcadosModel
 
 # Auxiliar values to create the dual quaternion
 qw_1_aux = ca.MX.sym('qw_1_aux', 1, 1)

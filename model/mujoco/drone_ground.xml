@@ -1,0 +1,82 @@
+<mujoco model="MuJoCo Model">
+  <!-- Ground-start copy of the non-payload quadrotor model. -->
+  <compiler angle="radian"/>
+  <option timestep="0.001" gravity="0 0 -9.81" density="1.225" viscosity="1.8e-05" integrator="RK4" jacobian="sparse">
+    <flag energy="enable" contact="enable"/>
+  </option>
+
+  <asset>
+    <texture name="texchecker" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.8 0.8 0.8" rgb2="0.2 0.2 0.2" />
+    <material name="matchecker" texture="texchecker" texrepeat="4 4"
+              reflectance="0.2" shininess="0.5" specular="0.3" />
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" type="plane" size="20 20 0.1" material="matchecker"
+          rgba="1 1 1 1" friction="1.0 0.005 0.0001" condim="3"/>
+
+    <!-- Spawn near the floor so takeoff is manager-driven instead of mid-air. -->
+    <body name="drone" pos="0 0 0.015" euler="0 0 0">
+      <joint name="drone" type="free" damping="0.005" armature="0" pos="0 0 0"/>
+
+      <geom name="core" type="box" pos="0 0 0" quat="1. 0. 0. 0." size="0.035 0.035 0.015"
+            rgba="1.0 1.0 0.0 1.0" mass=".84" friction="1.0 0.005 0.0001"/>
+
+      <geom name="a00" type="box" pos=".071 0.071 0.0" size="0.05 0.01 0.0025"
+            quat=".924 0.0 0.0 0.383" rgba="1.0 0.5 0.0 1.0" mass=".025"/>
+      <geom name="a10" type="box" pos=".071 -0.071 0.0" size="0.05 0.01 0.0025"
+            quat=".383 0.0 0.0 0.924" rgba="1.0 0.5 0.0 1.0" mass=".025"/>
+      <geom name="a20" type="box" pos="-0.071 -0.071 0.0" size="0.05 0.01 0.0025"
+            quat="-.383 0.0 0.0 0.924" rgba="1.0 0.5 0.0 1.0" mass=".025"/>
+      <geom name="a30" type="box" pos="-.071 0.071 0.0" size="0.05 0.01 0.0025"
+            quat=".924 0.0 0.0 -0.383" rgba="1.0 0.5 0.0 1.0" mass=".025"/>
+
+      <geom name="thruster0" type="cylinder" pos="0.1 0.1 0.01" size="0.05 0.0025"
+            quat="1.0 0.0 0.0 0." rgba="0.0 0.0 0.0 1.0" mass=".015"/>
+      <geom name="thruster1" type="cylinder" pos="0.1 -0.1 0.01" size="0.05 0.0025"
+            quat="1.0 0.0 0.0 0." rgba="0.0 0.0 0.0 1.0" mass=".015"/>
+      <geom name="thruster2" type="cylinder" pos="-0.1 -0.1 0.01" size="0.05 0.0025"
+            quat="1.0 0.0 0.0 0." rgba="0.0 0.0 0.0 1.0" mass=".015"/>
+      <geom name="thruster3" type="cylinder" pos="-0.1 0.1 0.01" size="0.05 0.0025"
+            quat="1.0 0.0 0.0 0." rgba="0.0 0.0 0.0 1.0" mass=".015"/>
+
+      <site name="qcX" type="box" pos="0.05 0.0 0.0" size="0.05 0.005 0.005"
+            quat="1.0 0.0 0.0 0." rgba="1 0 0 1"/>
+      <site name="qcY" type="box" pos="0.0 0.05 0.0" size="0.05 0.005 0.005"
+            quat="0.707 0.0 0.0 0.707" rgba="0 1 0 1"/>
+      <site name="qcZ" type="box" pos="0.0 0.0 0.05" size="0.05 0.005 0.005"
+            quat="-0.707 0.0 0.707 0." rgba="0 0 1 1"/>
+
+      <site name="thrust" type="box" pos="0 0 0" size="0.035 0.035 0.015" quat="1.0 0.0 0.0 0.0" rgba="0 1 1 1"/>
+      <site name="rateX" type="box" pos="0 0 0" quat="1. 0. 0. 0." size="0.035 0.035 0.015" rgba="0 1 1 1"/>
+      <site name="rateY" type="box" pos="0 0 0" quat="1. 0. 0. 0." size="0.035 0.035 0.015" rgba="0 1 1 1"/>
+      <site name="rateZ" type="box" pos="0 0 0" quat="1. 0. 0. 0." size="0.035 0.035 0.015" rgba="0 1 1 1"/>
+      <site name="imu" pos="0 0 0"/>
+      <site name="payload_point_drone" pos="0.0 0.0 -0.00"/>
+      <camera name="bottom_camera" pos="0.035 0 -0.015" euler="0 0 -1.57"/>
+    </body>
+
+    <!-- <geom name="rock" type="sphere" pos="1.5 -1.0 0.1" size="0.1" rgba="0.5 0.4 0.3 1"/>
+    <geom name="crate" type="box" pos="-1.5 1.5 0.2" size="0.2 0.2 0.2" rgba="0.6 0.3 0.1 1"/>
+    <geom name="barrel" type="cylinder" pos="0.5 1.0 0.3" size="0.15 0.3" rgba="0.2 0.2 0.7 1"/>
+    <geom name="tall_box" type="box" pos="2.0 0.0 0.4" size="0.1 0.1 0.4" rgba="0.2 0.6 0.2 1"/>
+    <geom name="metal_sphere" type="sphere" pos="0.0 0.0 0.2" size="0.2" rgba="0.4 0.4 0.4 1"/> -->
+  </worldbody>
+
+  <actuator>
+    <motor ctrllimited="true" ctrlrange="0 65.0" gear="0 0. 1. 0. 0. 0." site="thrust" name="body_thrust"/>
+    <motor ctrllimited="true" ctrlrange="-0.65 0.65" gear="0. 0. 0. 1. 0. 0." site="rateX" name="x_moment"/>
+    <motor ctrllimited="true" ctrlrange="-0.65 0.65" gear="0. 0. 0. 0. 1. 0." site="rateY" name="y_moment"/>
+    <motor ctrllimited="true" ctrlrange="-0.65 0.65" gear="0. 0. 0. 0. 0. 1." site="rateZ" name="z_moment"/>
+  </actuator>
+
+  <sensor>
+    <framequat name="drone_quat" objtype="site" objname="imu" noise="0.00"/>
+    <gyro name="drone_angular_velocity" site="imu" noise="0.00"/>
+    <accelerometer name="drone_linacc" site="imu" noise="0.00"/>
+    <framepos name="drone_position" objtype="site" objname="imu" noise="0.00"/>
+    <velocimeter name="drone_linear_velocity" site="imu" noise="0.00"/>
+  </sensor>
+</mujoco>

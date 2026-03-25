@@ -2,10 +2,46 @@ import os
 import sys
 import numpy as np
 from acados_template import AcadosOcp, AcadosOcpSolver
-from dq_nmpc import utils
-from dq_nmpc import export_model
+from . import utils
+from .ode_acados import export_model
 from casadi import Function, MX, vertcat, sin, cos, fabs, DM
-def solver(params, flag = True):
+
+
+def resolve_acados_paths(
+    json_file=None,
+    acados_work_dir=None,
+    code_export_directory=None,
+    json_filename='acados_ocp_mpc.json',
+):
+    if json_file is not None:
+        json_file = os.path.abspath(json_file)
+
+    if acados_work_dir is not None:
+        acados_work_dir = os.path.abspath(acados_work_dir)
+    elif json_file is not None:
+        acados_work_dir = os.path.dirname(json_file)
+    else:
+        acados_work_dir = os.getcwd()
+
+    if json_file is None:
+        json_file = os.path.join(acados_work_dir, json_filename)
+
+    if code_export_directory is None:
+        code_export_directory = os.path.join(acados_work_dir, 'c_generated_code')
+    else:
+        code_export_directory = os.path.abspath(code_export_directory)
+
+    return json_file, code_export_directory, acados_work_dir
+
+
+def solver(
+    params,
+    flag=True,
+    json_file=None,
+    acados_work_dir=None,
+    code_export_directory=None,
+    verbose=True,
+):
     # get dynamical model
     model, get_trans, get_quat, constraint, error_lie_2, dual_error, ln, Ad, conjugate, rotation = export_model(params)
 
@@ -156,7 +192,30 @@ def solver(params, flag = True):
     ocp.solver_options.sim_method_num_steps = 1  # Number of integration steps
     ocp.solver_options.sim_method_newton_iter = 2  # Newton iterations for convergence
 
-    acados_solver = AcadosOcpSolver(ocp, json_file='acados_ocp_mpc.json', build = flag, generate = flag)
+    resolved_json_file, resolved_code_export_directory, resolved_work_dir = resolve_acados_paths(
+        json_file=json_file,
+        acados_work_dir=acados_work_dir,
+        code_export_directory=code_export_directory,
+    )
+
+    if flag:
+        os.makedirs(resolved_work_dir, exist_ok=True)
+        os.makedirs(resolved_code_export_directory, exist_ok=True)
+    elif not os.path.exists(resolved_json_file):
+        raise FileNotFoundError(
+            f'acados json file not found at {resolved_json_file}. '
+            'Provide a valid json_file or enable solver generation.'
+        )
+
+    ocp.code_export_directory = resolved_code_export_directory
+
+    acados_solver = AcadosOcpSolver(
+        ocp,
+        json_file=resolved_json_file,
+        build=flag,
+        generate=flag,
+        verbose=verbose,
+    )
     return acados_solver, ocp
 
 if __name__ == "__main__":
