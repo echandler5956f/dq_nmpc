@@ -300,6 +300,12 @@ class DQBenchmarkCore:
     def set_reference_from_message(self, msg):
         self.set_reference_from_points(msg.points)
 
+    def clear_odometry(self):
+        self.has_odometry = False
+
+    def clear_reference(self):
+        self.has_reference = False
+
     def ready(self):
         return self.has_odometry and self.has_reference
 

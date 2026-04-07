@@ -4,6 +4,7 @@ import numpy as np
 
 from dq_nmpc.benchmark_backend import _extract_translation
 from dq_nmpc.benchmark_backend import _quaternion_wxyz_to_xyzw
+from dq_nmpc.benchmark_backend import DQBenchmarkCore
 from dq_nmpc.benchmark_backend import odometry_to_state
 from dq_nmpc.dq_controller import resolve_acados_paths
 
@@ -40,3 +41,16 @@ def test_quaternion_and_translation_helpers_handle_expected_layouts():
     )
     np.testing.assert_allclose(_extract_translation([0.0, 4.0, 5.0, 6.0]), [4.0, 5.0, 6.0])
     np.testing.assert_allclose(_extract_translation([4.0, 5.0, 6.0]), [4.0, 5.0, 6.0])
+
+
+def test_clear_methods_drop_readiness_flags_without_constructing_solver():
+    core = object.__new__(DQBenchmarkCore)
+    core.has_odometry = True
+    core.has_reference = True
+
+    core.clear_odometry()
+    assert not core.has_odometry
+    assert core.has_reference
+
+    core.clear_reference()
+    assert not core.has_reference
