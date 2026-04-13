@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import numpy as np
@@ -32,6 +33,78 @@ def resolve_acados_paths(
         code_export_directory = os.path.abspath(code_export_directory)
 
     return json_file, code_export_directory, acados_work_dir
+
+
+def _acados_signature_file(json_file):
+    json_root, _ = os.path.splitext(os.path.abspath(json_file))
+    return f'{json_root}.solver_signature.json'
+
+
+def _shared_lib_name(model_name):
+    if os.name == 'nt':
+        return f'acados_ocp_solver_{model_name}.dll'
+    if sys.platform == 'darwin':
+        return f'libacados_ocp_solver_{model_name}.dylib'
+    return f'libacados_ocp_solver_{model_name}.so'
+
+
+def _solver_generation_signature(params):
+    nmpc = params['nmpc']
+    return {
+        'version': 1,
+        'mav_name': str(params['mav_name']),
+        'mass': float(params['mass']),
+        'gravity': float(params['gravity']),
+        'ixx': float(params['ixx']),
+        'iyy': float(params['iyy']),
+        'izz': float(params['izz']),
+        'nmpc': {
+            'horizon_steps': int(nmpc['horizon_steps']),
+            'horizon_time': float(nmpc['horizon_time']),
+            'nx': int(nmpc['nx']),
+            'nu': int(nmpc['nu']),
+            'lbu': [float(value) for value in nmpc['lbu']],
+            'ubu': [float(value) for value in nmpc['ubu']],
+        },
+    }
+
+
+def _load_json(path):
+    with open(path, 'r', encoding='utf-8') as stream:
+        return json.load(stream)
+
+
+def _save_json(path, payload):
+    with open(path, 'w', encoding='utf-8') as stream:
+        json.dump(payload, stream, indent=2, sort_keys=True)
+        stream.write('\n')
+
+
+def _acados_solver_artifacts_match(params, json_file, code_export_directory):
+    signature_file = _acados_signature_file(json_file)
+    shared_lib = os.path.join(code_export_directory, _shared_lib_name(params['mav_name']))
+
+    if not os.path.exists(json_file):
+        return False
+    if not os.path.exists(signature_file):
+        return False
+    if not os.path.exists(shared_lib):
+        return False
+
+    try:
+        existing_signature = _load_json(signature_file)
+        solver_json = _load_json(json_file)
+    except (json.JSONDecodeError, OSError):
+        return False
+
+    expected_signature = _solver_generation_signature(params)
+    if existing_signature != expected_signature:
+        return False
+
+    return (
+        solver_json.get('name') == params['mav_name']
+        and os.path.abspath(solver_json.get('code_export_directory', '')) == os.path.abspath(code_export_directory)
+    )
 
 
 def solver(
@@ -198,6 +271,13 @@ def solver(
         code_export_directory=code_export_directory,
     )
 
+    signature_file = _acados_signature_file(resolved_json_file)
+    reuse_existing_solver = flag and _acados_solver_artifacts_match(
+        params,
+        resolved_json_file,
+        resolved_code_export_directory,
+    )
+
     if flag:
         os.makedirs(resolved_work_dir, exist_ok=True)
         os.makedirs(resolved_code_export_directory, exist_ok=True)
@@ -209,13 +289,25 @@ def solver(
 
     ocp.code_export_directory = resolved_code_export_directory
 
+    should_generate = bool(flag and not reuse_existing_solver)
+    should_build = should_generate
+
+    if reuse_existing_solver and verbose:
+        print(
+            f'Reusing existing acados solver artifacts from {resolved_code_export_directory}.'
+        )
+
     acados_solver = AcadosOcpSolver(
         ocp,
         json_file=resolved_json_file,
-        build=flag,
-        generate=flag,
+        build=should_build,
+        generate=should_generate,
         verbose=verbose,
     )
+
+    if should_generate:
+        _save_json(signature_file, _solver_generation_signature(params))
+
     return acados_solver, ocp
 
 if __name__ == "__main__":
