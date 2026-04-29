@@ -1,10 +1,10 @@
 import dataclasses
 from typing import List
 import casadi as cs
-from dq_nmpc.type import Scalar, Vector
+from .type import Scalar, Vector
 import numpy as np
 from numbers import Number
-from dq_nmpc import Quaternion
+from .quaternion_casadi import Quaternion
 from dataclasses import field
 
 @dataclasses.dataclass

@@ -1,5 +1,5 @@
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosSimSolver
-from dq_nmpc import quadrotorModel
+from .ode_acados import quadrotorModel
 from casadi import Function, MX, vertcat, sin, cos, fabs, DM
 import casadi as ca
 

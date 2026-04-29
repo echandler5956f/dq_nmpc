@@ -12,3 +12,7 @@ from .nmpc_acados import create_ocp_solver
 from .ode_acados import compute_flatness_states
 from .utils import yaml_to_dict
 from .dq_controller import solver
+from .dq_controller import resolve_acados_paths
+from .benchmark_backend import DQBenchmarkCore
+from .benchmark_backend import DQStateSnapshot
+from .benchmark_backend import DQSolveSnapshot

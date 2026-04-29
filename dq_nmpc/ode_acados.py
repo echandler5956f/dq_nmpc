@@ -1,8 +1,8 @@
 import numpy as np
 import casadi as ca
 import numpy as np
-from dq_nmpc import Quaternion
-from dq_nmpc import DualQuaternion
+from .quaternion_casadi import Quaternion
+from .dual_quaternion_casadi import DualQuaternion
 from casadi import Function
 from acados_template import AcadosModel
 from scipy.spatial.transform import Rotation as R
@@ -1210,6 +1210,8 @@ def H(t):
     return H
 
 def quadratic_program(t, waypoints, h_init, h_final):
+    import osqp
+
     A_data = A(t)
     b_data = B(waypoints, h_init, h_final)
     H_data = H(t)

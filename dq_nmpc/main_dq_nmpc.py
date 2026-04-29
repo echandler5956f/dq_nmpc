@@ -66,7 +66,11 @@ class DQnmpcNode(Node):
         self.declare_parameter('nmpc.nu', 0)
         
         self.declare_parameter('flag_build', True)
+        self.declare_parameter('wait_for_reference', False)
+        self.declare_parameter('reference_timeout_sec', 0.0)
         self.flag_build = self.get_parameter('flag_build').value
+        self.wait_for_reference = self.get_parameter('wait_for_reference').value
+        self.reference_timeout_sec = self.get_parameter('reference_timeout_sec').value
 
 
         # Access parameters
@@ -204,6 +208,10 @@ class DQnmpcNode(Node):
         # Auxiliar vector where we can to save all the information formulated as dualquaternion
         self.X = np.zeros((14, 1), dtype=np.double)
         self.X[:, 0] = np.array(ca.vertcat(self.dual_1, self.dual_twist_1)).reshape((14, ))
+        self.has_odometry = False
+        self.has_reference = False
+        self.last_reference_time = None
+        self.waiting_log_sent = False
 
         ## Auxiliar variables for the controller
         self.dual_1_control = dualquat_from_pose(1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -226,6 +234,9 @@ class DQnmpcNode(Node):
         self.start_time = time.time()
 
     def callback_get_planner(self, msg):
+        if len(msg.points) == 0:
+            return None
+
         # Empty Vector for classical formulation
         pre_quat = np.array([1.0, 0.0, 0.0, 0.0])
         current_quat = np.zeros((4, ))
@@ -278,6 +289,10 @@ class DQnmpcNode(Node):
             #self.u_d[1:4, i] = np.array([k.torque.x, k.torque.y, k.torque.z])
             i = i + 1
 
+        self.has_reference = True
+        self.last_reference_time = self.get_clock().now()
+        self.waiting_log_sent = False
+
         # Send data
         self.send_marker()
         self.send_ref()
@@ -328,7 +343,29 @@ class DQnmpcNode(Node):
         # Init Dual Twist
         self.dual_twist_1 = dual_twist(self.angular_linear_1, self.dual_1)
         self.X[:, 0] = np.array(ca.vertcat(self.dual_1, self.dual_twist_1)).reshape((14, ))
+        self.has_odometry = True
         return None
+
+    def references_ready(self):
+        if not self.wait_for_reference:
+            return True
+
+        if not self.has_odometry or not self.has_reference:
+            if not self.waiting_log_sent:
+                self.get_logger().info('Waiting for odometry and manager reference before publishing control.')
+                self.waiting_log_sent = True
+            return False
+
+        if self.reference_timeout_sec > 0.0 and self.last_reference_time is not None:
+            dt = (self.get_clock().now() - self.last_reference_time).nanoseconds / 1e9
+            if dt > self.reference_timeout_sec:
+                if not self.waiting_log_sent:
+                    self.get_logger().warn('Manager reference timed out; holding control publication until a fresh reference arrives.')
+                    self.waiting_log_sent = True
+                self.has_reference = False
+                return False
+
+        return True
 
 
     def send_ref(self):
@@ -395,6 +432,9 @@ class DQnmpcNode(Node):
         return None
 
     def control_nmpc(self):
+        if not self.references_ready():
+            return None
+
         # Optimal Control
         self.acados_ocp_solver.set(0, "lbx", self.X[:, 0])
         self.acados_ocp_solver.set(0, "ubx", self.X[:, 0])
