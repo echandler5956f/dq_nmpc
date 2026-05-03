@@ -22,32 +22,32 @@
     mav_name: "quadrotor"
     platform_type: "eagle"
     gravity: 9.80665
-    mass: 1.0
+    mass: 0.875
     # mass: 1.176   # race7, race8
     frame_dx: 0.078
     frame_dy: 0.0985
-    motor_time_constant: 0.05
+    motor_time_constant: 0.02
     min_rpm: 1080.0
     max_rpm: 24000.0
     drag_coefficient: 0.0
     kf: 2.47e-08
     km: 2.68e-10
-    ixx: 0.00305587
-    iyy: 0.00159695
-    izz: 0.00159687
+    ixx: 0.00454981
+    iyy: 0.00454981
+    izz: 0.00281995
 
     # nmpc_control_params
     nmpc:
-      Q:   [210., 210., 210., 250., 1., 1., 1., 5., 5., 5., 5., 1., 1., 1.]
-      Q_e: [210., 210., 210., 250., 1., 1., 1., 5., 5., 5., 5., 1., 1., 1.]
-      R:   [0.7, 0.1, 0.1, 0.1]
+      Q:   [210., 210., 210., 300., 1., 1., 1., 5., 5., 5., 5., 1., 1., 1.]
+      Q_e: [210., 210., 210., 300., 1., 1., 1., 5., 5., 5., 5., 1., 1., 1.]
+      R:   [0.5, 0.1, 0.1, 0.1]
       nx: 14
       nu: 4
       lbu: [0.0, -0.65, -0.65, -0.65]
-      ubu: [65.0, 0.65, 0.65, 0.65]
-      horizon_steps: 21
+      ubu: [82.0, 0.65, 0.65, 0.65]
+      horizon_steps: 31
       horizon_time: 1.5
-      ts: 0.015
+      ts: 0.03
 
     # px4 interface
     lin_cof_a: 0.00005
