@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import sys
@@ -48,10 +49,31 @@ def _shared_lib_name(model_name):
     return f'libacados_ocp_solver_{model_name}.so'
 
 
+def _solver_source_sha256():
+    """Hash every local source file that defines the generated DQ OCP."""
+    source_root = os.path.dirname(os.path.abspath(__file__))
+    source_files = (
+        'dq_controller.py',
+        'ode_acados.py',
+        'functions.py',
+        'quaternion_casadi.py',
+        'dual_quaternion_casadi.py',
+    )
+    digest = hashlib.sha256()
+    for relative_path in source_files:
+        digest.update(relative_path.encode('utf-8'))
+        digest.update(b'\0')
+        with open(os.path.join(source_root, relative_path), 'rb') as stream:
+            digest.update(stream.read())
+        digest.update(b'\0')
+    return digest.hexdigest()
+
+
 def _solver_generation_signature(params):
     nmpc = params['nmpc']
     return {
-        'version': 1,
+        'version': 2,
+        'solver_source_sha256': _solver_source_sha256(),
         'mav_name': str(params['mav_name']),
         'mass': float(params['mass']),
         'gravity': float(params['gravity']),
@@ -101,9 +123,14 @@ def _acados_solver_artifacts_match(params, json_file, code_export_directory):
     if existing_signature != expected_signature:
         return False
 
+    code_gen_opts = solver_json.get('code_gen_opts', {})
+    recorded_export_directory = code_gen_opts.get(
+        'code_export_directory',
+        solver_json.get('code_export_directory', ''),
+    )
     return (
         solver_json.get('name') == params['mav_name']
-        and os.path.abspath(solver_json.get('code_export_directory', '')) == os.path.abspath(code_export_directory)
+        and os.path.abspath(recorded_export_directory) == os.path.abspath(code_export_directory)
     )
 
 
@@ -272,11 +299,18 @@ def solver(
     )
 
     signature_file = _acados_signature_file(resolved_json_file)
-    reuse_existing_solver = flag and _acados_solver_artifacts_match(
+    artifacts_match = _acados_solver_artifacts_match(
         params,
         resolved_json_file,
         resolved_code_export_directory,
     )
+    if not flag and not artifacts_match:
+        raise RuntimeError(
+            'Cached Acados solver artifacts are missing or do not match the '
+            'current DQ model, cost, dimensions, bounds, and source hash. '
+            'Enable solver generation with dq_build:=true.'
+        )
+    reuse_existing_solver = artifacts_match
 
     if flag:
         os.makedirs(resolved_work_dir, exist_ok=True)

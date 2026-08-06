@@ -8,6 +8,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+import dq_nmpc.dq_controller as dq_controller
 from dq_nmpc.benchmark_backend import _extract_translation
 from dq_nmpc.benchmark_backend import _quaternion_wxyz_to_xyzw
 from dq_nmpc.benchmark_backend import DQBenchmarkCore
@@ -88,6 +89,27 @@ def test_solver_generation_signature_changes_for_codegen_inputs():
     assert _solver_generation_signature(updated) != _solver_generation_signature(params)
 
 
+def test_solver_generation_signature_records_source_hash():
+    params = yaml_to_dict('config/mujoco/default/dq_control.yaml')
+    signature = _solver_generation_signature(params)
+
+    assert signature['version'] == 2
+    assert signature['solver_source_sha256'] == dq_controller._solver_source_sha256()
+    assert len(signature['solver_source_sha256']) == 64
+    int(signature['solver_source_sha256'], 16)
+
+
+def test_solver_generation_signature_changes_with_source_hash(monkeypatch):
+    params = yaml_to_dict('config/mujoco/default/dq_control.yaml')
+    original = _solver_generation_signature(params)
+
+    monkeypatch.setattr(dq_controller, '_solver_source_sha256', lambda: '0' * 64)
+    changed = _solver_generation_signature(params)
+
+    assert changed != original
+    assert changed['solver_source_sha256'] == '0' * 64
+
+
 def test_acados_solver_artifacts_match_uses_signature_and_paths(tmp_path):
     params = yaml_to_dict('config/mujoco/default/dq_control.yaml')
     json_file, code_export_directory, _ = resolve_acados_paths(acados_work_dir=tmp_path)
@@ -98,7 +120,7 @@ def test_acados_solver_artifacts_match_uses_signature_and_paths(tmp_path):
         json_file,
         {
             'name': params['mav_name'],
-            'code_export_directory': code_export_directory,
+            'code_gen_opts': {'code_export_directory': code_export_directory},
         },
     )
     _save_json(
