@@ -1,4 +1,5 @@
 import copy
+import math
 import time
 from dataclasses import dataclass
 
@@ -86,7 +87,6 @@ class DQSolveSnapshot:
     solve_time_ms: float
     control: np.ndarray
     nominal: DQStateSnapshot
-    predicted_states: list[DQStateSnapshot]
 
 
 def _as_array(values, expected_length):
@@ -171,60 +171,64 @@ def extract_reference_from_points(points, inertia_matrix, horizon_steps):
             f'Expected exactly {horizon_steps} reference points, received {len(point_list)}.'
         )
 
-    x_ref = np.zeros((13, horizon_steps), dtype=np.double)
-    u_d = np.zeros((4, horizon_steps), dtype=np.double)
-    w_dot_ref = np.zeros((3, horizon_steps), dtype=np.double)
-    x_dual = np.zeros((14, horizon_steps), dtype=np.double)
+    reference_input = np.zeros((4, horizon_steps), dtype=np.double)
+    reference_state = np.zeros((14, horizon_steps), dtype=np.double)
+    ixx, iyy, izz = np.diag(inertia_matrix)
 
     for index, point in enumerate(point_list):
-        position = np.array(
-            [point.position.x, point.position.y, point.position.z],
-            dtype=np.double,
+        px, py, pz = point.position.x, point.position.y, point.position.z
+        vx, vy, vz = point.velocity.x, point.velocity.y, point.velocity.z
+        qw, qx, qy, qz = (
+            point.quaternion.w,
+            point.quaternion.x,
+            point.quaternion.y,
+            point.quaternion.z,
         )
-        velocity = np.array(
-            [point.velocity.x, point.velocity.y, point.velocity.z],
-            dtype=np.double,
+        wx, wy, wz = (
+            point.angular_velocity.x,
+            point.angular_velocity.y,
+            point.angular_velocity.z,
         )
-        quaternion_wxyz = np.array(
-            [point.quaternion.w, point.quaternion.x, point.quaternion.y, point.quaternion.z],
-            dtype=np.double,
-        )
-        angular_velocity = np.array(
-            [point.angular_velocity.x, point.angular_velocity.y, point.angular_velocity.z],
-            dtype=np.double,
-        )
-        angular_acceleration = np.array(
-            [
-                point.angular_velocity_dot.x,
-                point.angular_velocity_dot.y,
-                point.angular_velocity_dot.z,
-            ],
-            dtype=np.double,
+        ax, ay, az = (
+            point.angular_velocity_dot.x,
+            point.angular_velocity_dot.y,
+            point.angular_velocity_dot.z,
         )
 
-        x_ref[0:3, index] = position
-        x_ref[3:6, index] = velocity
-        x_ref[6:10, index] = quaternion_wxyz
-        x_ref[10:13, index] = angular_velocity
-
-        dual_pose = _dual_quaternion_from_pose(quaternion_wxyz, position)
-        dual_twist = _dual_twist_from_world_velocity(
-            quaternion_wxyz,
-            angular_velocity,
-            velocity,
+        reference_state[0:4, index] = qw, qx, qy, qz
+        reference_state[4:8, index] = (
+            -0.5 * (px * qx + py * qy + pz * qz),
+            0.5 * (qw * px + py * qz - pz * qy),
+            0.5 * (qw * py + pz * qx - px * qz),
+            0.5 * (qw * pz + px * qy - py * qx),
+        )
+        inverse_norm = 1.0 / math.sqrt(qw * qw + qx * qx + qy * qy + qz * qz)
+        qw, qx, qy, qz = (
+            qw * inverse_norm,
+            qx * inverse_norm,
+            qy * inverse_norm,
+            qz * inverse_norm,
+        )
+        reference_state[8:11, index] = wx, wy, wz
+        reference_state[11:14, index] = (
+            (1.0 - 2.0 * (qy * qy + qz * qz)) * vx
+            + 2.0 * (qx * qy + qw * qz) * vy
+            + 2.0 * (qx * qz - qw * qy) * vz,
+            2.0 * (qx * qy - qw * qz) * vx
+            + (1.0 - 2.0 * (qx * qx + qz * qz)) * vy
+            + 2.0 * (qy * qz + qw * qx) * vz,
+            2.0 * (qx * qz + qw * qy) * vx
+            + 2.0 * (qy * qz - qw * qx) * vy
+            + (1.0 - 2.0 * (qx * qx + qy * qy)) * vz,
+        )
+        reference_input[0, index] = float(point.force)
+        reference_input[1:4, index] = (
+            ixx * ax + (izz - iyy) * wy * wz,
+            iyy * ay + (ixx - izz) * wx * wz,
+            izz * az + (iyy - ixx) * wx * wy,
         )
 
-        x_dual[0:8, index] = dual_pose
-        x_dual[8:14, index] = dual_twist
-
-        u_d[0, index] = float(point.force)
-        w_dot_ref[:, index] = angular_acceleration
-        u_d[1:4, index] = inertia_matrix @ angular_acceleration + np.cross(
-            angular_velocity,
-            inertia_matrix @ angular_velocity,
-        )
-
-    return x_ref, u_d, w_dot_ref, x_dual
+    return reference_input, reference_state
 
 
 class DQBenchmarkCore:
@@ -281,6 +285,10 @@ class DQBenchmarkCore:
 
         self.reference_state = np.zeros((14, self.horizon_steps), dtype=np.double)
         self.reference_input = np.zeros((4, self.horizon_steps), dtype=np.double)
+        self.stage_parameters = np.empty((self.horizon_steps, 50), dtype=np.double)
+        self.stage_parameters[:, 18:32] = self.q_weights
+        self.stage_parameters[:, 32:46] = self.qe_weights
+        self.stage_parameters[:, 46:50] = self.r_weights
 
         self.has_odometry = False
         self.has_reference = False
@@ -342,11 +350,13 @@ class DQBenchmarkCore:
         )
 
     def set_reference_from_points(self, points):
-        _, self.reference_input, _, self.reference_state = extract_reference_from_points(
+        self.reference_input, self.reference_state = extract_reference_from_points(
             points,
             self.inertia_matrix,
             self.horizon_steps,
         )
+        self.stage_parameters[:, 0:14] = self.reference_state.T
+        self.stage_parameters[:, 14:18] = self.reference_input.T
         self.has_reference = True
 
     def set_reference_from_message(self, msg):
@@ -392,18 +402,9 @@ class DQBenchmarkCore:
         self.acados_ocp_solver.set(0, 'ubx', self.current_dual_state)
 
         for stage in range(self.horizon_steps):
-            parameters = np.hstack(
-                (
-                    self.reference_state[:, stage],
-                    self.reference_input[:, stage],
-                    self.q_weights,
-                    self.qe_weights,
-                    self.r_weights,
-                )
-            )
-            self.acados_ocp_solver.set(stage, 'p', parameters)
+            self.acados_ocp_solver.set(stage, 'p', self.stage_parameters[stage])
 
-        self.acados_ocp_solver.set(self.horizon_steps, 'p', parameters)
+        self.acados_ocp_solver.set(self.horizon_steps, 'p', self.stage_parameters[-1])
 
         start = time.perf_counter()
         self.last_status = int(self.acados_ocp_solver.solve())
@@ -411,17 +412,10 @@ class DQBenchmarkCore:
 
         control = np.asarray(self.acados_ocp_solver.get(0, 'u'), dtype=np.double).reshape(4,)
         nominal_state = np.asarray(self.acados_ocp_solver.get(1, 'x'), dtype=np.double).reshape(14,)
-        predicted_states = [
-            self.decode_dual_state(
-                np.asarray(self.acados_ocp_solver.get(stage, 'x'), dtype=np.double).reshape(14,)
-            )
-            for stage in range(1, self.horizon_steps + 1)
-        ]
 
         return DQSolveSnapshot(
             status=self.last_status,
             solve_time_ms=self.last_solve_time_ms,
             control=control,
             nominal=self.decode_dual_state(nominal_state),
-            predicted_states=predicted_states,
         )
