@@ -499,6 +499,9 @@ def dual_aceleraction_casadi(dual, omega, u, L):
     e3[2, 0] = 1.0
     g = L[4]
     m = L[0]
+    drag_linear = ca.DM(L[5])
+    drag_quadratic = ca.DM(L[6])
+    thrust_axis = ca.DM(L[7])
 
     # Compute linear and angular velocity from twist velocity
     w = omega[0:3, 0]
@@ -510,11 +513,12 @@ def dual_aceleraction_casadi(dual, omega, u, L):
     # Compute unforced part
     #a = ca.cross(-J_1@w, J@w)
     F_r = - J_1 @ ca.cross(w, J @ w)
-    F_d = ca.cross(v, w) - g*(f_rotation_inverse(q, e3))
+    drag = (drag_linear + drag_quadratic * ca.fabs(v)) * v
+    F_d = ca.cross(v, w) - g * f_rotation_inverse(q, e3) - drag
 
     # Compute forced part
     U_r = J_1@torques
-    U_d = (force/m)@e3
+    U_d = (force/m) * thrust_axis
 
     T_r = F_r + U_r
     T_d = F_d + U_d
@@ -527,7 +531,16 @@ def export_model(params):
     constraint = ca.types.SimpleNamespace()
 
     # Parameters Model
-    L = [params['mass'], params['ixx'], params['iyy'], params['izz'], params['gravity']]
+    L = [
+        params['mass'],
+        params['ixx'],
+        params['iyy'],
+        params['izz'],
+        params['gravity'],
+        params.get('drag_linear', [0.0, 0.0, 0.0]),
+        params.get('drag_quadratic', [0.0, 0.0, 0.0]),
+        params.get('thrust_axis_body', [0.0, 0.0, 1.0]),
+    ]
     print(L)
 
     # Model section parameters

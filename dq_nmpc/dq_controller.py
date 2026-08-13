@@ -80,6 +80,13 @@ def _solver_generation_signature(params):
         'ixx': float(params['ixx']),
         'iyy': float(params['iyy']),
         'izz': float(params['izz']),
+        'drag_linear': [float(value) for value in params.get('drag_linear', (0.0, 0.0, 0.0))],
+        'drag_quadratic': [
+            float(value) for value in params.get('drag_quadratic', (0.0, 0.0, 0.0))
+        ],
+        'thrust_axis_body': [
+            float(value) for value in params.get('thrust_axis_body', (0.0, 0.0, 1.0))
+        ],
         'nmpc': {
             'horizon_steps': int(nmpc['horizon_steps']),
             'horizon_time': float(nmpc['horizon_time']),

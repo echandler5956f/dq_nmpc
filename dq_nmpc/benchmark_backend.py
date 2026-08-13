@@ -7,18 +7,6 @@ from scipy.spatial.transform import Rotation as R
 
 from .dq_controller import resolve_acados_paths
 from .dq_controller import solver as create_solver
-from .functions import dualquat_from_pose_casadi
-from .ode_acados import dual_velocity_casadi
-from .ode_acados import dualquat_quat_casadi
-from .ode_acados import dualquat_trans_casadi
-from .ode_acados import velocities_from_twist_casadi
-
-
-_DUALQUAT_FROM_POSE = dualquat_from_pose_casadi()
-_DUAL_TWIST = dual_velocity_casadi()
-_GET_TRANS = dualquat_trans_casadi()
-_GET_QUAT = dualquat_quat_casadi()
-_VELOCITY_FROM_TWIST = velocities_from_twist_casadi()
 
 DQ_STATE_DIM = 14
 DQ_CONTROL_DIM = 4
@@ -49,6 +37,15 @@ def normalize_benchmark_params(params):
         'ixx': float(inertia['xx']),
         'iyy': float(inertia['yy']),
         'izz': float(inertia['zz']),
+        'drag_linear': [
+            float(vehicle['drag']['linear'][axis]) for axis in ('x', 'y', 'z')
+        ],
+        'drag_quadratic': [
+            float(vehicle['drag']['quadratic'][axis]) for axis in ('x', 'y', 'z')
+        ],
+        'thrust_axis_body': [
+            float(vehicle['thrust_axis_body'][axis]) for axis in ('x', 'y', 'z')
+        ],
         'nmpc': {
             'Q': copy.deepcopy(dq['Q']),
             'Q_e': copy.deepcopy(dq['Q']),
@@ -98,6 +95,37 @@ def _as_array(values, expected_length):
         raise ValueError(f'Expected vector of length {expected_length}, got {array.shape[0]}.')
     return array
 
+# These raw numpy quaternion/transform operators are added here for performance reasons. The existing casadi callbacks cause nontrivial slowdown.
+def _quaternion_multiply(first, second):
+    return np.array(
+        [
+            first[0] * second[0] - np.dot(first[1:], second[1:]),
+            *(first[0] * second[1:] + second[0] * first[1:] + np.cross(first[1:], second[1:])),
+        ],
+        dtype=np.double,
+    )
+
+
+def _dual_quaternion_from_pose(quaternion_wxyz, position):
+    real = _as_array(quaternion_wxyz, 4)
+    translation = _as_array(position, 3)
+    dual = 0.5 * _quaternion_multiply(np.r_[0.0, translation], real)
+    return np.concatenate((real, dual))
+
+
+def _dual_twist_from_world_velocity(quaternion_wxyz, angular_velocity, linear_velocity):
+    quat_xyzw = _quaternion_wxyz_to_xyzw(quaternion_wxyz)
+    angular = _as_array(angular_velocity, 3)
+    linear = R.from_quat(quat_xyzw).inv().apply(_as_array(linear_velocity, 3))
+    return np.concatenate((angular, linear))
+
+
+def _translation_from_dual_quaternion(dual_quaternion):
+    raw = _as_array(dual_quaternion, 8)
+    real = raw[0:4]
+    dual = raw[4:8]
+    return (2.0 * _quaternion_multiply(dual, np.r_[real[0], -real[1:]]))[1:4]
+
 
 def _extract_translation(dual_quaternion):
     raw = np.asarray(dual_quaternion, dtype=np.double).reshape(-1)
@@ -106,10 +134,9 @@ def _extract_translation(dual_quaternion):
     if raw.shape[0] == 4:
         return raw[1:4]
 
-    translation = np.asarray(_GET_TRANS(raw), dtype=np.double).reshape(-1)
-    if translation.shape[0] == 4:
-        return translation[1:4]
-    return _as_array(translation, 3)
+    if raw.shape[0] == 8:
+        return _translation_from_dual_quaternion(raw)
+    raise ValueError(f'Expected translation, quaternion, or dual quaternion; got {raw.shape[0]} values.')
 
 
 def _quaternion_wxyz_to_xyzw(quaternion_wxyz):
@@ -180,32 +207,15 @@ def extract_reference_from_points(points, inertia_matrix, horizon_steps):
         x_ref[6:10, index] = quaternion_wxyz
         x_ref[10:13, index] = angular_velocity
 
-        dual_pose = _DUALQUAT_FROM_POSE(
-            quaternion_wxyz[0],
-            quaternion_wxyz[1],
-            quaternion_wxyz[2],
-            quaternion_wxyz[3],
-            position[0],
-            position[1],
-            position[2],
-        )
-        dual_twist = _DUAL_TWIST(
-            np.array(
-                [
-                    angular_velocity[0],
-                    angular_velocity[1],
-                    angular_velocity[2],
-                    velocity[0],
-                    velocity[1],
-                    velocity[2],
-                ],
-                dtype=np.double,
-            ),
-            dual_pose,
+        dual_pose = _dual_quaternion_from_pose(quaternion_wxyz, position)
+        dual_twist = _dual_twist_from_world_velocity(
+            quaternion_wxyz,
+            angular_velocity,
+            velocity,
         )
 
-        x_dual[0:8, index] = np.asarray(dual_pose, dtype=np.double).reshape(8,)
-        x_dual[8:14, index] = np.asarray(dual_twist, dtype=np.double).reshape(6,)
+        x_dual[0:8, index] = dual_pose
+        x_dual[8:14, index] = dual_twist
 
         u_d[0, index] = float(point.force)
         w_dot_ref[:, index] = angular_acceleration
@@ -293,32 +303,15 @@ class DQBenchmarkCore:
             velocity_frame=velocity_frame,
         )
 
-        dual_pose = _DUALQUAT_FROM_POSE(
-            self.current_state[6],
-            self.current_state[7],
-            self.current_state[8],
-            self.current_state[9],
-            self.current_state[0],
-            self.current_state[1],
-            self.current_state[2],
-        )
-        dual_twist = _DUAL_TWIST(
-            np.array(
-                [
-                    self.current_state[10],
-                    self.current_state[11],
-                    self.current_state[12],
-                    self.current_state[3],
-                    self.current_state[4],
-                    self.current_state[5],
-                ],
-                dtype=np.double,
-            ),
-            dual_pose,
+        dual_pose = _dual_quaternion_from_pose(self.current_state[6:10], self.current_state[0:3])
+        dual_twist = _dual_twist_from_world_velocity(
+            self.current_state[6:10],
+            self.current_state[10:13],
+            self.current_state[3:6],
         )
 
-        self.current_dual_state[0:8] = np.asarray(dual_pose, dtype=np.double).reshape(8,)
-        self.current_dual_state[8:14] = np.asarray(dual_twist, dtype=np.double).reshape(6,)
+        self.current_dual_state[0:8] = dual_pose
+        self.current_dual_state[8:14] = dual_twist
         self.has_odometry = True
         return self.current_state.copy()
 
@@ -376,11 +369,13 @@ class DQBenchmarkCore:
         dual_pose = dual_state[0:8]
         dual_twist = dual_state[8:14]
 
-        quaternion_wxyz = np.asarray(_GET_QUAT(dual_pose), dtype=np.double).reshape(-1)
-        velocities = np.asarray(
-            _VELOCITY_FROM_TWIST(dual_twist, dual_pose),
-            dtype=np.double,
-        ).reshape(-1)
+        quaternion_wxyz = dual_pose[0:4]
+        velocities = np.concatenate(
+            (
+                dual_twist[0:3],
+                R.from_quat(_quaternion_wxyz_to_xyzw(quaternion_wxyz)).apply(dual_twist[3:6]),
+            )
+        )
 
         return DQStateSnapshot(
             position=_extract_translation(dual_pose),
