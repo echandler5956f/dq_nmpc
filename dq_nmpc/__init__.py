@@ -16,3 +16,4 @@ from .dq_controller import resolve_acados_paths
 from .benchmark_backend import DQBenchmarkCore
 from .benchmark_backend import DQStateSnapshot
 from .benchmark_backend import DQSolveSnapshot
+from .benchmark_backend import normalize_benchmark_params

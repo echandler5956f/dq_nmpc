@@ -1,3 +1,4 @@
+import copy
 import time
 from dataclasses import dataclass
 
@@ -18,6 +19,60 @@ _DUAL_TWIST = dual_velocity_casadi()
 _GET_TRANS = dualquat_trans_casadi()
 _GET_QUAT = dualquat_quat_casadi()
 _VELOCITY_FROM_TWIST = velocities_from_twist_casadi()
+
+DQ_STATE_DIM = 14
+DQ_CONTROL_DIM = 4
+
+
+def normalize_benchmark_params(params):
+    """Adapt the benchmark schema to the legacy solver schema.
+
+    The standalone dq-nmpc pipeline still uses its historical top-level
+    ``mass``/``ixx``/``nmpc`` structure.  LissajousTests supplies a smaller
+    benchmark schema where vehicle and transport settings are shared with
+    SRE.  Keep the translation at this boundary so the lab-facing solver API
+    remains unchanged.
+    """
+    if 'vehicle' not in params or 'dq_nmpc' not in params:
+        return copy.deepcopy(params)
+
+    vehicle = params['vehicle']
+    dq = params['dq_nmpc']
+    inertia = vehicle['inertia']
+    limits = vehicle['control_limits']
+    return {
+        # The benchmark has one fixed DQ model; this is an artifact label,
+        # not a LissajousTests tuning parameter.
+        'mav_name': 'quadrotor',
+        'mass': float(vehicle['mass']),
+        'gravity': float(vehicle['gravity']),
+        'ixx': float(inertia['xx']),
+        'iyy': float(inertia['yy']),
+        'izz': float(inertia['zz']),
+        'nmpc': {
+            'Q': copy.deepcopy(dq['Q']),
+            'Q_e': copy.deepcopy(dq['Q']),
+            'R': copy.deepcopy(dq['R']),
+            # The dual-quaternion model has fixed dimensions.  These are
+            # solver internals, not tuning parameters.
+            'nx': DQ_STATE_DIM,
+            'nu': DQ_CONTROL_DIM,
+            'lbu': [
+                float(limits['thrust_min']),
+                float(limits['mx_min']),
+                float(limits['my_min']),
+                float(limits['mz_min']),
+            ],
+            'ubu': [
+                float(limits['thrust_max']),
+                float(limits['mx_max']),
+                float(limits['my_max']),
+                float(limits['mz_max']),
+            ],
+            'horizon_steps': int(dq['horizon_steps']),
+            'horizon_time': float(dq['horizon_time']),
+        },
+    }
 
 
 @dataclass
@@ -172,7 +227,8 @@ class DQBenchmarkCore:
         code_export_directory=None,
         verbose=True,
     ):
-        self.params = params
+        self.params = normalize_benchmark_params(params)
+        params = self.params
         self.mass = float(params['mass'])
         self.gravity = float(params['gravity'])
         self.inertia_matrix = np.array(
@@ -186,7 +242,10 @@ class DQBenchmarkCore:
 
         self.horizon_steps = int(params['nmpc']['horizon_steps'])
         self.horizon_time = float(params['nmpc']['horizon_time'])
-        self.ts = float(params['nmpc']['ts'])
+        # ``ts`` belongs to the historical standalone API.  The benchmark
+        # adapter intentionally omits it: Acados uses horizon_time /
+        # horizon_steps for the active prediction interval.
+        self.ts = float(params['nmpc'].get('ts', 0.0))
         self.q_weights = np.asarray(params['nmpc']['Q'], dtype=np.double)
         self.qe_weights = np.asarray(params['nmpc']['Q_e'], dtype=np.double)
         self.r_weights = np.asarray(params['nmpc']['R'], dtype=np.double)
