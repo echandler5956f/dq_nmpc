@@ -344,6 +344,7 @@ def solver(
         build=should_build,
         generate=should_generate,
         verbose=verbose,
+        check_reuse_possible=False,
     )
 
     if should_generate:
