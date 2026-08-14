@@ -26,9 +26,16 @@ def normalize_benchmark_params(params):
         return copy.deepcopy(params)
 
     vehicle = params['vehicle']
+    cost = params['cost']
     dq = params['dq_nmpc']
     inertia = vehicle['inertia']
     limits = vehicle['control_limits']
+    position = float(cost['position'])
+    orientation = float(cost['orientation'])
+    linear_velocity = float(cost['linear_velocity'])
+    angular_velocity = float(cost['angular_velocity'])
+    thrust = float(cost['control_effort']['thrust'])
+    moment = float(cost['control_effort']['moment'])
     return {
         # The benchmark has one fixed DQ model; this is an artifact label,
         # not a LissajousTests tuning parameter.
@@ -48,9 +55,22 @@ def normalize_benchmark_params(params):
             float(vehicle['thrust_axis_body'][axis]) for axis in ('x', 'y', 'z')
         ],
         'nmpc': {
-            'Q': copy.deepcopy(dq['Q']),
-            'Q_e': copy.deepcopy(dq['Q']),
-            'R': copy.deepcopy(dq['R']),
+            # The scalar slots of each logarithmic quaternion are identically
+            # zero.  The six benchmark weights therefore expand only over the
+            # physical vector components; axis-specific tuning is unsupported.
+            'Q': [
+                0.0, position, position, position,
+                linear_velocity, linear_velocity, linear_velocity,
+                0.0, orientation, orientation, orientation,
+                angular_velocity, angular_velocity, angular_velocity,
+            ],
+            'Q_e': [
+                0.0, position, position, position,
+                linear_velocity, linear_velocity, linear_velocity,
+                0.0, orientation, orientation, orientation,
+                angular_velocity, angular_velocity, angular_velocity,
+            ],
+            'R': [thrust, moment, moment, moment],
             # The dual-quaternion model has fixed dimensions.  These are
             # solver internals, not tuning parameters.
             'nx': DQ_STATE_DIM,

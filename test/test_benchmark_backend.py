@@ -12,6 +12,7 @@ import dq_nmpc.dq_controller as dq_controller
 from dq_nmpc.benchmark_backend import _extract_translation
 from dq_nmpc.benchmark_backend import _quaternion_wxyz_to_xyzw
 from dq_nmpc.benchmark_backend import DQBenchmarkCore
+from dq_nmpc.benchmark_backend import normalize_benchmark_params
 from dq_nmpc.benchmark_backend import odometry_to_state
 from dq_nmpc.dq_controller import _acados_signature_file
 from dq_nmpc.dq_controller import _acados_solver_artifacts_match
@@ -67,6 +68,51 @@ def test_clear_methods_drop_readiness_flags_without_constructing_solver():
 
     core.clear_reference()
     assert not core.has_reference
+
+
+def test_benchmark_schema_expands_shared_uniform_cost_weights():
+    params = {
+        'vehicle': {
+            'mass': 0.875,
+            'gravity': 9.80665,
+            'inertia': {'xx': 1.0, 'yy': 2.0, 'zz': 3.0},
+            'drag': {
+                'linear': {'x': 0.1, 'y': 0.2, 'z': 0.3},
+                'quadratic': {'x': 0.4, 'y': 0.5, 'z': 0.6},
+            },
+            'thrust_axis_body': {'x': 0.0, 'y': 0.0, 'z': 1.0},
+            'control_limits': {
+                'thrust_min': 0.0,
+                'thrust_max': 60.0,
+                'mx_min': -2.0,
+                'mx_max': 2.0,
+                'my_min': -2.0,
+                'my_max': 2.0,
+                'mz_min': -0.3,
+                'mz_max': 0.3,
+            },
+        },
+        'cost': {
+            'position': 210.0,
+            'orientation': 5.0,
+            'linear_velocity': 1.0,
+            'angular_velocity': 2.0,
+            'control_effort': {'thrust': 0.5, 'moment': 0.1},
+        },
+        'dq_nmpc': {'horizon_steps': 21, 'horizon_time': 1.0},
+    }
+
+    normalized = normalize_benchmark_params(params)
+
+    assert normalized['nmpc']['Q'] == [
+        0.0, 210.0, 210.0, 210.0,
+        1.0, 1.0, 1.0,
+        0.0, 5.0, 5.0, 5.0,
+        2.0, 2.0, 2.0,
+    ]
+    assert normalized['nmpc']['Q_e'] == normalized['nmpc']['Q']
+    assert normalized['nmpc']['R'] == [0.5, 0.1, 0.1, 0.1]
+    assert normalized['nmpc']['horizon_time'] == 1.0
 
 
 def test_solver_generation_signature_ignores_runtime_only_tuning():
