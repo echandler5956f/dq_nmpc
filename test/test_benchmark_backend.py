@@ -99,7 +99,14 @@ def test_benchmark_schema_expands_shared_uniform_cost_weights():
             'angular_velocity': 2.0,
             'control_effort': {'thrust': 0.5, 'moment': 0.1},
         },
-        'dq_nmpc': {'horizon_steps': 21, 'horizon_time': 1.0},
+        'dq_nmpc': {
+            'horizon_steps': 21,
+            'horizon_time': 1.0,
+            'integrator_type': 'ERK',
+            'integrator_stages': 1,
+            'integrator_newton_iterations': 1,
+            'levenberg_marquardt': 0.0,
+        },
     }
 
     normalized = normalize_benchmark_params(params)
@@ -113,6 +120,10 @@ def test_benchmark_schema_expands_shared_uniform_cost_weights():
     assert normalized['nmpc']['Q_e'] == normalized['nmpc']['Q']
     assert normalized['nmpc']['R'] == [0.5, 0.1, 0.1, 0.1]
     assert normalized['nmpc']['horizon_time'] == 1.0
+    assert normalized['nmpc']['integrator_type'] == 'ERK'
+    assert normalized['nmpc']['integrator_stages'] == 1
+    assert normalized['nmpc']['integrator_newton_iterations'] == 1
+    assert normalized['nmpc']['levenberg_marquardt'] == 0.0
 
 
 def test_solver_generation_signature_ignores_runtime_only_tuning():
@@ -131,6 +142,8 @@ def test_solver_generation_signature_changes_for_codegen_inputs():
     params = yaml_to_dict('config/mujoco/default/dq_control.yaml')
     updated = deepcopy(params)
     updated['mass'] += 0.1
+    updated['nmpc']['integrator_newton_iterations'] = 1
+    updated['nmpc']['levenberg_marquardt'] = 0.0
 
     assert _solver_generation_signature(updated) != _solver_generation_signature(params)
 
@@ -139,7 +152,9 @@ def test_solver_generation_signature_records_source_hash():
     params = yaml_to_dict('config/mujoco/default/dq_control.yaml')
     signature = _solver_generation_signature(params)
 
-    assert signature['version'] == 2
+    assert signature['version'] == 5
+    assert signature['nmpc']['integrator_newton_iterations'] == 2
+    assert signature['nmpc']['levenberg_marquardt'] == 10.0
     assert signature['solver_source_sha256'] == dq_controller._solver_source_sha256()
     assert len(signature['solver_source_sha256']) == 64
     int(signature['solver_source_sha256'], 16)

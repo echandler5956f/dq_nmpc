@@ -72,7 +72,7 @@ def _solver_source_sha256():
 def _solver_generation_signature(params):
     nmpc = params['nmpc']
     return {
-        'version': 2,
+        'version': 5,
         'solver_source_sha256': _solver_source_sha256(),
         'mav_name': str(params['mav_name']),
         'mass': float(params['mass']),
@@ -90,6 +90,10 @@ def _solver_generation_signature(params):
         'nmpc': {
             'horizon_steps': int(nmpc['horizon_steps']),
             'horizon_time': float(nmpc['horizon_time']),
+            'integrator_type': str(nmpc.get('integrator_type', 'IRK')).upper(),
+            'integrator_stages': int(nmpc.get('integrator_stages', 4)),
+            'integrator_newton_iterations': int(nmpc.get('integrator_newton_iterations', 2)),
+            'levenberg_marquardt': float(nmpc.get('levenberg_marquardt', 10.0)),
             'nx': int(nmpc['nx']),
             'nu': int(nmpc['nu']),
             'lbu': [float(value) for value in nmpc['lbu']],
@@ -266,13 +270,27 @@ def solver(
     ocp.solver_options.qp_solver = 'FULL_CONDENSING_HPIPM'  # Efficient QP solver
     ocp.solver_options.nlp_solver_type = 'SQP_RTI'  # Fast real-time SQP
     ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'  # Gauss-Newton approximation
-    ocp.solver_options.integrator_type = 'IRK'  # Implicit Runge-Kutta (IRK)
+    integrator_type = str(params['nmpc'].get('integrator_type', 'IRK')).upper()
+    integrator_stages = int(params['nmpc'].get('integrator_stages', 4))
+    integrator_newton_iterations = int(
+        params['nmpc'].get('integrator_newton_iterations', 2)
+    )
+    levenberg_marquardt = float(params['nmpc'].get('levenberg_marquardt', 10.0))
+    if integrator_type not in ('ERK', 'IRK'):
+        raise ValueError(f'Unsupported integrator_type: {integrator_type}')
+    if integrator_stages <= 0:
+        raise ValueError('integrator_stages must be positive.')
+    if integrator_newton_iterations <= 0:
+        raise ValueError('integrator_newton_iterations must be positive.')
+    if levenberg_marquardt < 0.0:
+        raise ValueError('levenberg_marquardt must be nonnegative.')
+    ocp.solver_options.integrator_type = integrator_type
 
     ## Regularization (stabilizes optimization)
     ocp.solver_options.regularize_method = 'NO_REGULARIZE'  
 
     ## Levenberg-Marquardt regularization (optional)
-    ocp.solver_options.levenberg_marquardt = 10.0
+    ocp.solver_options.levenberg_marquardt = levenberg_marquardt
 
     ## NLP Solver Settings
     ocp.solver_options.nlp_solver_max_iter = 200  # Maximum iterations
@@ -295,9 +313,9 @@ def solver(
     ocp.solver_options.cg_hardcode_constraints = False  # Allow runtime constraint changes
     ocp.solver_options.cg_use_variable_weighting_matrix = True  # Support time-varying costs
 
-    ocp.solver_options.sim_method_num_stages = 4  # IRK-GL4: 4 stages for accuracy
-    ocp.solver_options.sim_method_num_steps = 1  # Number of integration steps
-    ocp.solver_options.sim_method_newton_iter = 2  # Newton iterations for convergence
+    ocp.solver_options.sim_method_num_stages = integrator_stages
+    ocp.solver_options.sim_method_num_steps = 1
+    ocp.solver_options.sim_method_newton_iter = integrator_newton_iterations
 
     resolved_json_file, resolved_code_export_directory, resolved_work_dir = resolve_acados_paths(
         json_file=json_file,

@@ -89,6 +89,10 @@ def normalize_benchmark_params(params):
             ],
             'horizon_steps': int(dq['horizon_steps']),
             'horizon_time': float(dq['horizon_time']),
+            'integrator_type': str(dq.get('integrator_type', 'IRK')).upper(),
+            'integrator_stages': int(dq.get('integrator_stages', 4)),
+            'integrator_newton_iterations': int(dq.get('integrator_newton_iterations', 2)),
+            'levenberg_marquardt': float(dq.get('levenberg_marquardt', 10.0)),
         },
     }
 
@@ -276,6 +280,12 @@ class DQBenchmarkCore:
 
         self.horizon_steps = int(params['nmpc']['horizon_steps'])
         self.horizon_time = float(params['nmpc']['horizon_time'])
+        self.integrator_type = str(params['nmpc'].get('integrator_type', 'IRK')).upper()
+        self.integrator_stages = int(params['nmpc'].get('integrator_stages', 4))
+        self.integrator_newton_iterations = int(
+            params['nmpc'].get('integrator_newton_iterations', 2)
+        )
+        self.levenberg_marquardt = float(params['nmpc'].get('levenberg_marquardt', 10.0))
         # ``ts`` belongs to the historical standalone API.  The benchmark
         # adapter intentionally omits it: Acados uses horizon_time /
         # horizon_steps for the active prediction interval.
